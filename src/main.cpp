@@ -16,7 +16,7 @@ using namespace std;
 using json = nlohmann::json;
 
     
-double BUFFER_MY = 50;
+double BUFFER_MY = 30;
 double BUFFER_LC = 20;
 double COST_COLLISION = 500;
 double COST_LEFT_TURN = 150;
@@ -339,8 +339,9 @@ int main() {
 
   int lane = 1;
   double ref_vel = 0.0; // mph
+  bool laneChanged = false;
 
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy, &lane, &ref_vel](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy, &lane, &ref_vel, &laneChanged](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -561,17 +562,17 @@ int main() {
             double min_cost = 800;
             vector<double> costs;
 
-            continue_lane_tc = cost_keep_lane(dist_closest_front, cars_mylane_s.size() , buffer_my, cost_collision);
+            continue_lane_tc = cost_keep_lane(dist_closest_front, cars_mylane_s.size() , BUFFER_MY, COST_COLLISION);
             costs.push_back(continue_lane_tc);
 
-            break_tc = cost_break(cost_slow_down);
+            break_tc = cost_break(COST_SLOW_DOWN);
             costs.push_back(break_tc);
 
-            left_turn_tc =  cost_change_left(dist_closest_leftfront,dist_closest_leftback, buffer_lc, cost_collision, cost_left_turn, violate_left);
+            left_turn_tc =  cost_change_left(dist_closest_leftfront,dist_closest_leftback, BUFFER_LC, COST_COLLISION, COST_LEFT_TURN, violate_left);
             costs.push_back(left_turn_tc);
 
 
-            right_turn_tc = cost_change_right(dist_closest_rightfront, dist_closest_rightback, buffer_lc, cost_collision, cost_right_turn, violate_right);
+            right_turn_tc = cost_change_right(dist_closest_rightfront, dist_closest_rightback, BUFFER_LC, COST_COLLISION, COST_RIGHT_TURN, violate_right);
             costs.push_back(right_turn_tc);
 
             //cout<<"Cost continue lane" <<continue_lane_tc<<endl;
@@ -592,17 +593,30 @@ int main() {
               }
             }
             // decide lane
-            if (decision == 0) {
+            if (decision == 0 || decision == 999) {
               cout<< "Decision: Stay in lane with max vel" <<endl;
+              if(ref_vel<49.5){
+                ref_vel += .224;
+              }
+              laneChanged = false;
             } else if (decision == 1) {
               cout<< "Decision: Stay in lane but slow down" <<endl;
-              ref_vel -= .224;
+              if(ref_vel > closest_front_vel){
+                ref_vel -= .224;
+              }
+              laneChanged = false;
             } else if (decision == 2) {
               cout<< "Decision: Change to left lane" <<endl;
-              lane -= 1;
+              if(!laneChanged){
+                lane -= 1;
+                laneChanged = true;
+              }
             } else {
               cout<< "Decision: Change to right lane" <<endl;
-              lane += 1;
+              if(!laneChanged){
+                lane += 1;
+                laneChanged = true;
+              }
             }
 
 
@@ -611,33 +625,33 @@ int main() {
               car_s = end_path_s;
             }
 
-            bool too_close = false;
+            //bool too_close = false;
 
-            for(int i = 0; i < sensor_fusion.size();i++){
-              float d = sensor_fusion[i][6];
-              if(d < (2+4*lane+2) && d > (2+4*lane-2)){
-                double vx = sensor_fusion[i][3];
-                double vy = sensor_fusion[i][4];
-                double check_speed = sqrt(vx*vx+vy*vy);
-                double check_car_s = sensor_fusion[i][5];
+            //for(int i = 0; i < sensor_fusion.size();i++){
+            //  float d = sensor_fusion[i][6];
+            //  if(d < (2+4*lane+2) && d > (2+4*lane-2)){
+            //    double vx = sensor_fusion[i][3];
+            //    double vy = sensor_fusion[i][4];
+            //    double check_speed = sqrt(vx*vx+vy*vy);
+            //    double check_car_s = sensor_fusion[i][5];
 
-                check_car_s+=((double)prev_size*.02*check_speed);
-                if((check_car_s > car_s) && ((check_car_s-car_s) < 30)){
-                  // do some logic here, lower reference velocity so we don't crash in to the car infront of us, could also flag to try to change lanes.
-                  //ref_vel = 29.5; // mph
-                  too_close = true;
-                  if(lane > 0){
-                    lane = 0;
-                  }
-                }
-              }
-            }
+            //    check_car_s+=((double)prev_size*.02*check_speed);
+            //    if((check_car_s > car_s) && ((check_car_s-car_s) < 30)){
+            //      // do some logic here, lower reference velocity so we don't crash in to the car infront of us, could also flag to try to change lanes.
+            //      //ref_vel = 29.5; // mph
+            //      too_close = true;
+            //      if(lane > 0){
+            //        lane = 0;
+            //      }
+            //    }
+            //  }
+            //}
 
-            if(too_close){
-              ref_vel -= .224;
-            } else if(ref_vel<49.5){
-              ref_vel += .224;
-            }
+            //if(too_close){
+            //  ref_vel -= .224;
+            //} else if(ref_vel<49.5){
+            //  ref_vel += .224;
+            //}
 
 
             vector<double> ptsx;
@@ -671,9 +685,9 @@ int main() {
               ptsy.push_back(ref_y);
             }
 
-            vector<double> next_wp0 = getXY(car_s+30,(2+4*lane),map_waypoints_s,map_waypoints_x,map_waypoints_y);
-            vector<double> next_wp1 = getXY(car_s+60,(2+4*lane),map_waypoints_s,map_waypoints_x,map_waypoints_y);
-            vector<double> next_wp2 = getXY(car_s+90,(2+4*lane),map_waypoints_s,map_waypoints_x,map_waypoints_y);
+            vector<double> next_wp0 = getXY(car_s+40,(2+4*lane),map_waypoints_s,map_waypoints_x,map_waypoints_y);
+            vector<double> next_wp1 = getXY(car_s+80,(2+4*lane),map_waypoints_s,map_waypoints_x,map_waypoints_y);
+            vector<double> next_wp2 = getXY(car_s+120,(2+4*lane),map_waypoints_s,map_waypoints_x,map_waypoints_y);
 
             ptsx.push_back(next_wp0[0]);
             ptsx.push_back(next_wp1[0]);
@@ -723,7 +737,7 @@ int main() {
               double x_ref = x_point;
               double y_ref = y_point;
               
-              // rotate back to normal after rotating it eralier
+              // rotate back to normal after rotating it earlier
               x_point = (x_ref * cos(ref_yaw)-y_ref*sin(ref_yaw));
               y_point = (x_ref * sin(ref_yaw)+y_ref*cos(ref_yaw));
 
